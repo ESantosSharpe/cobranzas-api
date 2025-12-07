@@ -1,7 +1,7 @@
 {
   "name": "cobranzas-api",
-  "version": "1.0.0",
-  "description": "API para sistema de cobranzas jurídicas",
+  "version": "2.1.0",
+  "description": "API para sistema de cobranzas jurídicas con SQLite persistente",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -15,5 +15,8 @@
   },
   "engines": {
     "node": "18.x"
-  }
+  },
+  "keywords": ["cobranzas", "api", "sqlite", "google-sheets"],
+  "author": "Tu Nombre",
+  "license": "MIT"
 }
