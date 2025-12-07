@@ -93,10 +93,10 @@ function inicializarBD() {
                 
                 // Insertar instrumentos de ejemplo
                 db.run(`INSERT INTO instrumentos (id_deudor, tipo, numero, monto, fecha_emision, fecha_vencimiento, tasa_interes) VALUES 
-                  (1, 'CHEQUE', '0001-123456', 150000.00, '2024-01-15', '2024-03-15', 5.0),
-                  (1, 'PAGARÉ', 'PN-001-2024', 75000.50, '2024-02-01', '2024-04-01', 4.5),
+                  (1, 'ECHEQ', '0001-123456', 150000.00, '2024-01-15', '2024-03-15', 5.0),
+                  (1, 'FACTURA', 'PN-001-2024', 75000.50, '2024-02-01', '2024-04-01', 4.5),
                   (2, 'FACTURA', 'FA-001-2024', 234500.00, '2024-01-20', '2024-02-20', 6.0),
-                  (3, 'CHEQUE', '0002-654321', 50000.00, '2024-01-10', '2024-01-31', 5.0)`);
+                  (3, 'ECHEQ', '0002-654321', 50000.00, '2024-01-10', '2024-01-31', 5.0)`);
                 
                 console.log('✅ Datos de ejemplo insertados');
               }
