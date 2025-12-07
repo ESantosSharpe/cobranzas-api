@@ -18,6 +18,7 @@ const dbPath = path.join(__dirname, 'database.sqlite');
 const db = new sqlite3.Database(dbPath);
 
 // Función para inicializar base de datos
+// Función para inicializar base de datos (SIN DATOS DE EJEMPLO)
 function inicializarBD() {
   return new Promise((resolve, reject) => {
     // Tabla de deudores
@@ -32,7 +33,12 @@ function inicializarBD() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`, (err) => {
-      if (err) reject(err);
+      if (err) {
+        console.error('❌ Error creando tabla deudores:', err);
+        reject(err);
+        return;
+      }
+      console.log('✅ Tabla "deudores" creada/verificada');
       
       // Tabla de instrumentos
       db.run(`CREATE TABLE IF NOT EXISTS instrumentos (
@@ -50,7 +56,12 @@ function inicializarBD() {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(id_deudor) REFERENCES deudores(id) ON DELETE CASCADE
       )`, (err) => {
-        if (err) reject(err);
+        if (err) {
+          console.error('❌ Error creando tabla instrumentos:', err);
+          reject(err);
+          return;
+        }
+        console.log('✅ Tabla "instrumentos" creada/verificada');
         
         // Tabla de pagos
         db.run(`CREATE TABLE IF NOT EXISTS pagos (
@@ -63,7 +74,12 @@ function inicializarBD() {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY(id_instrumento) REFERENCES instrumentos(id) ON DELETE CASCADE
         )`, (err) => {
-          if (err) reject(err);
+          if (err) {
+            console.error('❌ Error creando tabla pagos:', err);
+            reject(err);
+            return;
+          }
+          console.log('✅ Tabla "pagos" creada/verificada');
           
           // Tabla de procesos
           db.run(`CREATE TABLE IF NOT EXISTS procesos (
@@ -76,29 +92,26 @@ function inicializarBD() {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(id_instrumento) REFERENCES instrumentos(id) ON DELETE CASCADE
           )`, (err) => {
-            if (err) reject(err);
+            if (err) {
+              console.error('❌ Error creando tabla procesos:', err);
+              reject(err);
+              return;
+            }
+            console.log('✅ Tabla "procesos" creada/verificada');
             
-            // Datos de ejemplo (solo si las tablas están vacías)
+            // VERIFICAR SI LAS TABLAS ESTÁN VACÍAS Y MOSTRAR MENSAJE
             db.get('SELECT COUNT(*) as count FROM deudores', (err, row) => {
-              if (err) reject(err);
+              if (err) {
+                console.error('❌ Error verificando datos:', err);
+                reject(err);
+                return;
+              }
               
               if (row.count === 0) {
-                console.log('📊 Insertando datos de ejemplo...');
-                
-                // Insertar deudores de ejemplo
-                db.run(`INSERT INTO deudores (cuit, nombre, domicilio, telefono, email) VALUES 
-                  ('30-12345678-9', 'Empresa Ejemplo S.A.', 'Av. Siempre Viva 123', '011-4321-5678', 'contacto@empresaejemplo.com'),
-                  ('20-98765432-1', 'Comercio López Hnos.', 'Calle Falsa 456', '011-8765-4321', 'info@lopezhnos.com'),
-                  ('27-55556666-7', 'Distribuidora Mayorista SRL', 'Ruta 8 Km 45', '02345-478912', 'ventas@distribuidora.com')`);
-                
-                // Insertar instrumentos de ejemplo
-                db.run(`INSERT INTO instrumentos (id_deudor, tipo, numero, monto, fecha_emision, fecha_vencimiento, tasa_interes) VALUES 
-                  (1, 'ECHEQ', '0001-123456', 150000.00, '2024-01-15', '2024-03-15', 5.0),
-                  (1, 'FACTURA', 'PN-001-2024', 75000.50, '2024-02-01', '2024-04-01', 4.5),
-                  (2, 'FACTURA', 'FA-001-2024', 234500.00, '2024-01-20', '2024-02-20', 6.0),
-                  (3, 'ECHEQ', '0002-654321', 50000.00, '2024-01-10', '2024-01-31', 5.0)`);
-                
-                console.log('✅ Datos de ejemplo insertados');
+                console.log('📭 Base de datos vacía - lista para usar');
+                console.log('💡 Sugerencia: Crea tu primer deudor desde Google Sheets');
+              } else {
+                console.log(`📊 Base de datos con ${row.count} deudores existentes`);
               }
               
               resolve();
@@ -113,36 +126,49 @@ function inicializarBD() {
 
 // ========== ENDPOINTS ACTUALIZADOS ==========
 
-// Raíz - con información de la BD
+// Raíz - Información de la API
 app.get('/', (req, res) => {
   db.get('SELECT COUNT(*) as deudores FROM deudores', (err, deudoresRow) => {
     db.get('SELECT COUNT(*) as instrumentos FROM instrumentos', (err, instRow) => {
+      const deudores = deudoresRow?.deudores || 0;
+      const instrumentos = instRow?.instrumentos || 0;
+      
       res.json({
         status: 'online',
-        service: 'API Cobranzas Jurídicas',
+        service: 'API Cobranzas Jurídicas - PRODUCCIÓN',
         version: '2.1.0',
-        database: 'SQLite persistente',
-        estadisticas: {
-          total_deudores: deudoresRow.deudores,
-          total_instrumentos: instRow.instrumentos
+        environment: process.env.NODE_ENV || 'production',
+        database: {
+          type: 'SQLite persistente',
+          path: dbPath,
+          records: {
+            deudores: deudores,
+            instrumentos: instrumentos,
+            estado: deudores === 0 ? 'vacía' : 'con datos'
+          }
         },
         endpoints: [
           'GET  /api/deudores',
           'POST /api/deudores',
+          'GET  /api/deudores/:id',
           'PUT  /api/deudores/:id',
           'DELETE /api/deudores/:id',
           'GET  /api/instrumentos',
           'POST /api/instrumentos',
+          'GET  /api/instrumentos/:id',
           'PUT  /api/instrumentos/:id',
           'DELETE /api/instrumentos/:id',
           'GET  /api/pagos',
           'POST /api/pagos',
-          'GET  /api/procesos',
-          'POST /api/procesos',
           'GET  /api/estadisticas',
-          'GET  /api/exportar',
-          'GET  /api/buscar'
-        ]
+          'GET  /api/buscar?q=texto&tipo=deudores|instrumentos',
+          'GET  /api/status',
+          'GET  /api/exportar'
+        ],
+        documentation: 'Usa POST /api/deudores para crear el primer registro',
+        message: deudores === 0 
+          ? 'Base de datos vacía. Crea tu primer deudor usando POST /api/deudores'
+          : `Sistema activo con ${deudores} deudores y ${instrumentos} instrumentos`
       });
     });
   });
@@ -466,47 +492,71 @@ app.get('/api/estadisticas', (req, res) => {
       completed++;
       
       if (completed === queries.length) {
-        const total = results.deuda_pendiente + results.total_recuperado;
-        results.porcentaje_recupero = total > 0 
-          ? ((results.total_recuperado / total) * 100).toFixed(2)
-          : '0.00';
+        // Calcular porcentaje de recupero (evitar división por 0)
+        const totalDeuda = results.deuda_pendiente + results.total_recuperado;
         
-        // Obtener vencimientos próximos (7 días)
-        db.all(
-          `SELECT COUNT(*) as count FROM instrumentos 
-           WHERE estado = 'PENDIENTE' 
-           AND fecha_vencimiento BETWEEN date('now') AND date('now', '+7 days')`,
-          [],
-          (err, row) => {
-            if (!err) {
-              results.vencimientos_proximos = row[0]?.count || 0;
-            }
-            
-            // Obtener deudas vencidas
-            db.all(
-              `SELECT COUNT(*) as count FROM instrumentos 
-               WHERE estado = 'PENDIENTE' 
-               AND fecha_vencimiento < date('now')`,
-              [],
-              (err, row) => {
-                if (!err) {
-                  results.deudas_vencidas = row[0]?.count || 0;
-                }
-                
-                res.json({ 
-                  success: true, 
-                  data: results,
-                  timestamp: new Date().toISOString()
-                });
+        if (totalDeuda > 0) {
+          results.porcentaje_recupero = ((results.total_recuperado / totalDeuda) * 100).toFixed(2);
+        } else {
+          results.porcentaje_recupero = '0.00';
+        }
+        
+        // Calcular vencimientos solo si hay instrumentos
+        if (results.total_instrumentos > 0) {
+          db.all(
+            `SELECT COUNT(*) as count FROM instrumentos 
+             WHERE estado = 'PENDIENTE' 
+             AND fecha_vencimiento BETWEEN date('now') AND date('now', '+7 days')`,
+            [],
+            (err, row) => {
+              if (!err) {
+                results.vencimientos_proximos = row[0]?.count || 0;
               }
-            );
-          }
-        );
+              
+              db.all(
+                `SELECT COUNT(*) as count FROM instrumentos 
+                 WHERE estado = 'PENDIENTE' 
+                 AND fecha_vencimiento < date('now')`,
+                [],
+                (err, row) => {
+                  if (!err) {
+                    results.deudas_vencidas = row[0]?.count || 0;
+                  }
+                  
+                  // Agregar flag de base de datos vacía
+                  results.base_vacia = results.total_deudores === 0;
+                  
+                  res.json({ 
+                    success: true, 
+                    data: results,
+                    timestamp: new Date().toISOString(),
+                    message: results.total_deudores === 0 
+                      ? 'Base de datos vacía - Crea tu primer deudor'
+                      : 'Estadísticas calculadas correctamente'
+                  });
+                }
+              );
+            }
+          );
+        } else {
+          // Si no hay instrumentos, devolver valores por defecto
+          results.vencimientos_proximos = 0;
+          results.deudas_vencidas = 0;
+          results.base_vacia = results.total_deudores === 0;
+          
+          res.json({ 
+            success: true, 
+            data: results,
+            timestamp: new Date().toISOString(),
+            message: results.total_deudores === 0 
+              ? 'Base de datos vacía - Crea tu primer deudor'
+              : 'No hay instrumentos registrados'
+          });
+        }
       }
     });
   });
 });
-
 // ========== ENDPOINTS ADICIONALES ÚTILES ==========
 
 // Exportar todos los datos
