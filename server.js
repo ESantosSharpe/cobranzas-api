@@ -410,7 +410,286 @@ app.delete('/api/instrumentos/:id', (req, res) => {
     }
   });
 });
+// ========== ENDPOINTS PARA PAGOS COMPLETOS ==========
 
+// OBTENER PAGOS CON INFORMACIÓN DE INSTRUMENTOS
+app.get('/api/pagos-completos', (req, res) => {
+  db.all(`
+    SELECT 
+      p.*,
+      i.numero as instrumento_numero,
+      i.tipo as instrumento_tipo,
+      i.monto as instrumento_monto,
+      d.nombre as deudor_nombre,
+      d.cuit as deudor_cuit
+    FROM pagos p
+    LEFT JOIN instrumentos i ON p.id_instrumento = i.id
+    LEFT JOIN deudores d ON i.id_deudor = d.id
+    ORDER BY p.fecha_pago DESC
+  `, [], (err, rows) => {
+    if (err) {
+      res.status(500).json({ success: false, error: err.message });
+    } else {
+      res.json({ success: true, data: rows });
+    }
+  });
+});
+
+// REGISTRAR PAGO Y ACTUALIZAR ESTADO DEL INSTRUMENTO
+app.post('/api/pagos-completos', (req, res) => {
+  const { id_instrumento, fecha_pago, monto, forma_pago, comprobante, actualizar_estado = true } = req.body;
+  
+  // Validaciones
+  if (!id_instrumento || !fecha_pago || !monto) {
+    return res.status(400).json({ 
+      success: false, 
+      error: 'id_instrumento, fecha_pago y monto son requeridos' 
+    });
+  }
+  
+  // Iniciar transacción
+  db.serialize(() => {
+    db.run('BEGIN TRANSACTION');
+    
+    // 1. Insertar el pago
+    db.run(
+      `INSERT INTO pagos (id_instrumento, fecha_pago, monto, forma_pago, comprobante) 
+       VALUES (?, ?, ?, ?, ?)`,
+      [id_instrumento, fecha_pago, parseFloat(monto), forma_pago || null, comprobante || null],
+      function(err) {
+        if (err) {
+          db.run('ROLLBACK');
+          res.status(500).json({ success: false, error: err.message });
+          return;
+        }
+        
+        const pagoId = this.lastID;
+        
+        // 2. Si se solicita, actualizar estado del instrumento
+        if (actualizar_estado) {
+          // Verificar si el instrumento está totalmente pagado
+          db.get(
+            `SELECT 
+              i.monto as monto_instrumento,
+              COALESCE(SUM(p.monto), 0) as total_pagado
+             FROM instrumentos i
+             LEFT JOIN pagos p ON i.id = p.id_instrumento
+             WHERE i.id = ?
+             GROUP BY i.id`,
+            [id_instrumento],
+            (err, row) => {
+              if (err) {
+                db.run('ROLLBACK');
+                res.status(500).json({ success: false, error: err.message });
+                return;
+              }
+              
+              const montoInstrumento = parseFloat(row.monto_instrumento) || 0;
+              const totalPagado = parseFloat(row.total_pagado) || 0;
+              
+              let nuevoEstado = 'PENDIENTE';
+              
+              if (totalPagado >= montoInstrumento) {
+                nuevoEstado = 'PAGADO';
+              } else if (totalPagado > 0) {
+                nuevoEstado = 'PAGO PARCIAL';
+              }
+              
+              // Actualizar estado del instrumento
+              db.run(
+                `UPDATE instrumentos 
+                 SET estado = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`,
+                [nuevoEstado, id_instrumento],
+                (err) => {
+                  if (err) {
+                    db.run('ROLLBACK');
+                    res.status(500).json({ success: false, error: err.message });
+                    return;
+                  }
+                  
+                  db.run('COMMIT');
+                  res.json({ 
+                    success: true, 
+                    id: pagoId,
+                    estado_actualizado: nuevoEstado,
+                    message: 'Pago registrado e instrumento actualizado'
+                  });
+                }
+              );
+            }
+          );
+        } else {
+          db.run('COMMIT');
+          res.json({ 
+            success: true, 
+            id: pagoId,
+            message: 'Pago registrado (sin actualizar estado)' 
+          });
+        }
+      }
+    );
+  });
+});
+
+// ========== ENDPOINTS PARA PROCESOS COMPLETOS ==========
+
+// OBTENER PROCESOS CON INFORMACIÓN DE INSTRUMENTOS
+app.get('/api/procesos-completos', (req, res) => {
+  db.all(`
+    SELECT 
+      pr.*,
+      i.numero as instrumento_numero,
+      i.tipo as instrumento_tipo,
+      i.monto as instrumento_monto,
+      i.estado as instrumento_estado,
+      d.nombre as deudor_nombre,
+      d.cuit as deudor_cuit
+    FROM procesos pr
+    LEFT JOIN instrumentos i ON pr.id_instrumento = i.id
+    LEFT JOIN deudores d ON i.id_deudor = d.id
+    ORDER BY pr.fecha DESC, pr.etapa
+  `, [], (err, rows) => {
+    if (err) {
+      res.status(500).json({ success: false, error: err.message });
+    } else {
+      res.json({ success: true, data: rows });
+    }
+  });
+});
+
+// REGISTRAR PROCESO Y ACTUALIZAR ESTADO DEL INSTRUMENTO
+app.post('/api/procesos-completos', (req, res) => {
+  const { id_instrumento, etapa, fecha, observaciones, responsable, actualizar_estado = true } = req.body;
+  
+  // Validaciones
+  if (!id_instrumento || !etapa || !fecha) {
+    return res.status(400).json({ 
+      success: false, 
+      error: 'id_instrumento, etapa y fecha son requeridos' 
+    });
+  }
+  
+  // Validar etapas permitidas
+  const etapasPermitidas = ['DEMANDA', 'NOTIFICACIÓN', 'EMBARGOS', 'REMATE', 'SENTENCIA', 'EJECUCIÓN', 'FINALIZADO'];
+  if (!etapasPermitidas.includes(etapa.toUpperCase())) {
+    return res.status(400).json({ 
+      success: false, 
+      error: `Etapa no válida. Use: ${etapasPermitidas.join(', ')}` 
+    });
+  }
+  
+  db.run(
+    `INSERT INTO procesos (id_instrumento, etapa, fecha, observaciones, responsable) 
+     VALUES (?, ?, ?, ?, ?)`,
+    [id_instrumento, etapa, fecha, observaciones || null, responsable || null],
+    function(err) {
+      if (err) {
+        res.status(500).json({ success: false, error: err.message });
+        return;
+      }
+      
+      const procesoId = this.lastID;
+      
+      // Si se solicita, actualizar estado del instrumento
+      if (actualizar_estado) {
+        let nuevoEstado = 'EN PROCESO';
+        
+        // Si la etapa es "FINALIZADO", marcar como finalizado
+        if (etapa.toUpperCase() === 'FINALIZADO') {
+          nuevoEstado = 'FINALIZADO';
+        }
+        
+        db.run(
+          `UPDATE instrumentos 
+           SET estado = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [nuevoEstado, id_instrumento],
+          (err) => {
+            if (err) {
+              console.error('Error actualizando estado:', err);
+              // No fallar si solo hay error en actualización de estado
+            }
+            
+            res.json({ 
+              success: true, 
+              id: procesoId,
+              estado_actualizado: nuevoEstado,
+              message: 'Proceso registrado e instrumento actualizado'
+            });
+          }
+        );
+      } else {
+        res.json({ 
+          success: true, 
+          id: procesoId,
+          message: 'Proceso registrado (sin actualizar estado)' 
+        });
+      }
+    }
+  );
+});
+
+// ========== ENDPOINT PARA OBTENER INSTRUMENTOS PARA PAGOS ==========
+
+// OBTENER INSTRUMENTOS PARA REGISTRAR PAGOS (pendientes o parciales)
+app.get('/api/instrumentos-para-pagos', (req, res) => {
+  db.all(`
+    SELECT 
+      i.*,
+      d.nombre as deudor_nombre,
+      d.cuit as deudor_cuit,
+      COALESCE(SUM(p.monto), 0) as total_pagado,
+      i.monto - COALESCE(SUM(p.monto), 0) as saldo_pendiente
+    FROM instrumentos i
+    LEFT JOIN deudores d ON i.id_deudor = d.id
+    LEFT JOIN pagos p ON i.id = p.id_instrumento
+    WHERE i.estado IN ('PENDIENTE', 'PAGO PARCIAL')
+    GROUP BY i.id, i.monto, d.nombre, d.cuit
+    HAVING saldo_pendiente > 0
+    ORDER BY i.fecha_vencimiento
+  `, [], (err, rows) => {
+    if (err) {
+      res.status(500).json({ success: false, error: err.message });
+    } else {
+      res.json({ success: true, data: rows });
+    }
+  });
+});
+
+// ========== ENDPOINT PARA OBTENER INSTRUMENTOS PARA PROCESOS ==========
+
+// OBTENER INSTRUMENTOS PARA INICIAR PROCESOS (vencidos y no pagados)
+app.get('/api/instrumentos-para-procesos', (req, res) => {
+  db.all(`
+    SELECT 
+      i.*,
+      d.nombre as deudor_nombre,
+      d.cuit as deudor_cuit,
+      d.domicilio as deudor_domicilio,
+      COALESCE(SUM(p.monto), 0) as total_pagado,
+      i.monto - COALESCE(SUM(p.monto), 0) as saldo_pendiente,
+      CASE 
+        WHEN i.fecha_vencimiento < date('now') THEN 'VENCIDO'
+        ELSE 'POR VENCER'
+      END as situacion_vencimiento,
+      julianday('now') - julianday(i.fecha_vencimiento) as dias_vencido
+    FROM instrumentos i
+    LEFT JOIN deudores d ON i.id_deudor = d.id
+    LEFT JOIN pagos p ON i.id = p.id_instrumento
+    WHERE i.estado IN ('PENDIENTE', 'VENCIDO', 'PAGO PARCIAL')
+      AND (i.fecha_vencimiento < date('now') OR i.estado = 'VENCIDO')
+    GROUP BY i.id, i.monto, d.nombre, d.cuit, d.domicilio, i.fecha_vencimiento
+    HAVING saldo_pendiente > 0
+    ORDER BY dias_vencido DESC, i.fecha_vencimiento
+  `, [], (err, rows) => {
+    if (err) {
+      res.status(500).json({ success: false, error: err.message });
+    } else {
+      res.json({ success: true, data: rows });
+    }
+  });
+});
 // ========== ENDPOINTS DE BÚSQUEDA Y ESTADÍSTICAS ==========
 
 app.get('/api/buscar', (req, res) => {
